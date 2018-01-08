@@ -1,0 +1,112 @@
+---
+title: "Practical Machine Learning Coursera PGA"
+author: "Marlein"
+date: "8 januari 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r cache = TRUE, eval=FALSE, warning=FALSE, echo=FALSE}
+rm(list = ls())
+set.seed(4711)
+library(dplyr)
+library(ElemStatLearn)
+library(AppliedPredictiveModeling)
+library(e1071)
+library(caret)
+library(gbm)
+library(mlbench)
+```
+
+###Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+What is the data about. I found this explanation on the website and hereby cite as asked: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. 
+
+"Weight Lifting Exercises Dataset
+
+This human activity recognition research has traditionally focused on discriminating between different activities, i.e. to predict "which" activity was performed at a specific point in time (like with the Daily Living Activities dataset above). The approach we propose for the Weight Lifting Exercises dataset is to investigate "how (well)" an activity was performed by the wearer. The "how (well)" investigation has only received little attention so far, even though it potentially provides useful information for a large variety of applications,such as sports training.
+
+In this work (see the paper) we first define quality of execution and investigate three aspects that pertain to qualitative activity recognition: the problem of specifying correct execution, the automatic and robust detection of execution mistakes, and how to provide feedback on the quality of execution to the user. We tried out an on-body sensing approach (dataset here), but also an "ambient sensing approach" (by using Microsoft Kinect - dataset still unavailable)
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+###Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+###Getting, Exploring and Cleaning the Data
+```{r}
+URLtrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+URLtest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+traindat <- read.csv(URLtrain)
+testdat <- read.csv(URLtest)
+dim(traindat); dim(testdat)
+```
+
+The training data consist of 19622 observations of each 160 variables. The test data has 20 observations and again 160 variables. First I look at the columns that contain NA's. I do this in the `testdat`, because building a model on variables that won't be there when I have to use the model, is not very handy.
+```{r}
+NAcolumns_100 <- testdat[colSums(is.na(testdat)) == 20] #Which columns have all NA's
+NAcolumns_0 <- testdat[colSums(is.na(testdat)) > 0]# Which columns have at least 1 NA
+identical(NAcolumns_100, NAcolumns_0)
+```
+Because every column that contains more than 1 NA does not contain any other values, I do not have to decide if I should keep a column because there is partially data in it. So I throw out all columns that are NA from the traindat, and than have a look at the variables again.
+```{r}
+NA_T_or_F <- sapply (1:dim(testdat)[2], function(x)sum(is.na(testdat[,x])))
+NAcolnumbers <- which(NA_T_or_F>0)
+worktraindat <- dplyr::select(traindat, -NAcolnumbers)
+names(worktraindat)
+```
+I did not succees in finding the explanation of all the variable names on the above mentioned site or elswere on the internet. So I have to figure out myself what variables are relevant. These columns/variables are not relevant:`X` is the number of the observation, `user name` is the subject name, the time stamps are not relevant so doesn't the variables `new_window` and `num_window`. All other variables, except `classe` apear to be registrations of movements/use of muscels. So the first 7 variables will be deleted. Then I take another look at the dataset.
+```{r}
+worktraindat <- worktraindat[,-c(1:7)]
+dim(worktraindat)
+table(worktraindat$classe)
+```
+So I will work with the 19622 observartions with each 53 variables for building a model. The table gives us insight in the amount of times a Unilateral Dumbbell Biceps Curl was performed in the right way (cat. A: 5580 times) or in the wrong way (categories B - E = 14042 times).
+
+###Model selection, cross validation and expected out of sample error 
+
+The caret package knows almost 300 different models. After doing some research on the internet about the caret-package and how to choose models, I think this kind of data will probably give good results on three types of models: GBM (Gradient Boosted Machine), RF (Random Forest) and SV (Support Vector Machine).
+
+The crossvalidation will be carried out within the train command. I set the `cv` with the number on 3. For reproducibility I use set.seed. 
+
+```{r}
+crossval <- caret::trainControl(method="cv", number=3) #setting the crossvalidation
+set.seed(4711)
+modelGbm <- caret::train(classe ~., data=worktraindat, method="gbm", trControl=crossval, verbose=FALSE)
+set.seed(4711)
+modelRF <- caret::train(classe ~., data=worktraindat, method="rf", trControl=crossval, verbose=FALSE)
+set.seed(4711)
+modelSV <- caret::train(classe ~., data=worktraindat, method="svmRadial", trControl=crossval, verbose=FALSE)
+allmodels <- caret::resamples(list(GBM=modelGbm, RF=modelRF, SV=modelSV))
+summary(allmodels)
+bwplot(allmodels)
+dotplot(allmodels)
+```
+It is obvious that the Random Forest method gives the highest accuracy. So I will use `modelRF` for the prediction. 
+```{r}
+modelRF
+```
+
+The accuracy is quite high, 99%! This means that the expected out of sample error is 1 - .99 = .01. So we expect that 1 % of all predictions will give a false result.
+
+###20 Predictions on testdat
+
+It is not neccesary to alter the `testdat`, because it contains all the variables that `modelRF` need. The extra variables that are in `testdat` which were removed in `traindat` will cause no problems. 
+
+```{r}
+predict_on_tesdat <- predict(modelRF, testdat)
+predict_on_tesdat
+```
+
